@@ -1,46 +1,79 @@
 name: Verify Human Identity
-
 on:
   workflow_dispatch:
     inputs:
       agent_name:
         description: 'fauzitkj'
         required: true
-        default: 'fauzitkj'
-      agent_description:
-        description: 'fauzitkj'
-        required: true
-        default: 'fauzitkj AI Agent'
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '22' # Naikin ke 22, tadinya 20
-
-      - name: Step 1 - Install ClawHub skill
-        run: npx clawhub@latest install human-identity # GANTI NAMA SKILL
-        continue-on-error: true # Biar ga stop kalo skill error
+          node-version: '20'
 
       - name: Install script dependencies
-        run: |
-          cd scripts
-          npm install
+        working-directory: scripts
+        run: npm install
 
-      - name: Step 2 - Create new Ethereum Identity
-        env:
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-        run: node scripts/createNewEthereumIdentity.js
+      - name: Step 2 - Create Wallet Baru + Derive Address
+        working-directory: scripts
+        run:  |
+          rm -rf ~/.openclaw/billions/kms.json
+          node createNewEthereumIdentity.js
 
-      - name: Step 3 - Link Human to Agent
-        env:
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-        run: |
-          node scripts/manualLinkHumanToAgent.js --challenge '{"name": "${{ github.event.inputs.agent_name }}", "description": "${{ github.event.inputs.agent_description }}"}'
+          node -e "
+          const { Wallet } = require('ethers');
+          const fs = require('fs');
+          const kmsPath = process.env.HOME + '/.openclaw/billions/kms.json';
+          const kms = JSON.parse(fs.readFileSync(kmsPath, 'utf8'));
+
+          let pk = kms[0]?.data?.key || kms[0]?.privateKeyHex || kms[0]?.privateKey;
+          if (!pk) throw new Error('Private key tidak ketemu di kms.json');
+          if (!pk.startsWith('0x')) pk = '0x' + pk;
+
+          const wallet = new Wallet(pk);
+
+          const output = 'Agent: ${{ github.event.inputs.agent_name }}\nAddress: ' + wallet.address + '\nPrivate Key: ' + wallet.privateKey;
+          fs.writeFileSync('../wallet.txt', output);
+
+          console.log('=== BACKUP WAJIB ===');
+          console.log(output);
+          console.log('=== BACKUP WAJIB ===');
+          "
+
+      - name: Save Wallet as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-wallet-${{ github.event.inputs.agent_name }}
+          path: wallet.txt
+          retention-days: 90
+
+      - name: Step 3 - Generate Link Panjang i_m 24 Jam
+        working-directory: scripts
+        run:  |
+          echo "Generating long link i_m..."
+
+          SHORT_URL=$(node manualLinkHumanToAgent.js --challenge '{"name": "${{ github.event.inputs.agent_name }}", "description": "${{ github.event.inputs.agent_name }} AI Agent"}' | grep -o 'https://wallet.billions.network#request_uri=https://[^ ]*')
+
+          echo "Short URL: $SHORT_URL"
+
+          FETCH_URL=$(echo "$SHORT_URL" | sed 's/.*request_uri=//')
+          echo "Fetching JSON from: $FETCH_URL"
+
+          REQUEST_JSON=$(curl -s "$FETCH_URL")
+
+          if [ -z "$REQUEST_JSON" ]; then
+            echo "Gagal fetch JSON dari shortener. Coba Run ulang."
+            exit 1
+          fi
+
+          ENCODED=$(echo -n "$REQUEST_JSON" | base64 | tr '+/' '-_' | tr -d '=')
+
+          echo ""
+          echo "=== LINK PANJANG 24 JAM ==="
+          echo "https://wallet.billions.network/#i_m=$ENCODED"
+          echo "=== COPY FULL LINK DI ATAS ==="
