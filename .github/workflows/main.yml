@@ -23,10 +23,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '20'
+          node-version: '22' # Naikin ke 22, tadinya 20
 
       - name: Step 1 - Install ClawHub skill
-        run: npx clawhub@latest install verified-agent-identity
+        run: npx clawhub@latest install human-identity # GANTI NAMA SKILL
+        continue-on-error: true # Biar ga stop kalo skill error
 
       - name: Install script dependencies
         run: |
@@ -34,8 +35,12 @@ jobs:
           npm install
 
       - name: Step 2 - Create new Ethereum Identity
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
         run: node scripts/createNewEthereumIdentity.js
 
       - name: Step 3 - Link Human to Agent
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
         run: |
           node scripts/manualLinkHumanToAgent.js --challenge '{"name": "${{ github.event.inputs.agent_name }}", "description": "${{ github.event.inputs.agent_description }}"}'
